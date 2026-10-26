@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.28)
+project(LidarAlgorithm LANGUAGES CXX)
+find_package(Qt6 6.8.3 REQUIRED COMPONENTS Core)
+find_package(OpenMP REQUIRED)
+add_library(LidarAlgorithm INTERFACE)
+add_library(Lidar::Algorithm ALIAS LidarAlgorithm)
+target_compile_features(LidarAlgorithm INTERFACE cxx_std_20)
+target_include_directories(LidarAlgorithm INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(LidarAlgorithm INTERFACE Qt6::Core OpenMP::OpenMP_CXX)
+
+# 作为依赖时不接管宿主的测试开关。
+if(PROJECT_IS_TOP_LEVEL)
+    include(CTest)
+    if(BUILD_TESTING)
+        add_subdirectory(tests)
+    endif()
+endif()

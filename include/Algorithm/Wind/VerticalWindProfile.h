@@ -50,20 +50,31 @@ struct VerticalWindProfileUnit
 
 using VerticalWindProfilePtr = std::shared_ptr<const VerticalWindProfileUnit>;
 
+// 非均匀整帧：高度与风矢量分数组连续保存。同下标对应同一层。
+// 消费入口只在接收时检查等长、有限且递增的高度；发布后生产者不得修改任一数组。
+struct NonuniformVerticalWindProfileUnit
+{
+    std::chrono::system_clock::time_point at;
+    std::vector<double> heights;
+    std::vector<LinAlg::Vec3> winds;
+};
+using NonuniformVerticalWindProfilePtr = std::shared_ptr<const NonuniformVerticalWindProfileUnit>;
+
 // 定长历史：只保存完整帧的只读份额，满后覆盖最旧槽；同步由所属线程/使用方负责。
-class VerticalWindProfileHistory
+template <class Profile>
+class WindProfileHistory
 {
 public:
-    explicit VerticalWindProfileHistory(std::size_t capacity) : slots_(capacity)
+    explicit WindProfileHistory(std::size_t capacity) : slots_(capacity)
     {
         if (capacity == 0) throw std::invalid_argument("Wind profile history capacity must be positive.");
     }
     [[nodiscard]] std::size_t size() const noexcept { return count_; }
     [[nodiscard]] std::size_t capacity() const noexcept { return slots_.size(); }
     [[nodiscard]] std::size_t slotAt(std::size_t index) const noexcept { return (head_ + index) % slots_.size(); }
-    [[nodiscard]] const VerticalWindProfilePtr &at(std::size_t index) const { return slots_[slotAt(index)]; }
-    [[nodiscard]] VerticalWindProfilePtr latest() const { return count_ ? at(count_ - 1) : nullptr; }
-    std::size_t append(VerticalWindProfilePtr frame)
+    [[nodiscard]] const std::shared_ptr<const Profile> &at(std::size_t index) const { return slots_[slotAt(index)]; }
+    [[nodiscard]] std::shared_ptr<const Profile> latest() const { return count_ ? at(count_ - 1) : nullptr; }
+    std::size_t append(std::shared_ptr<const Profile> frame)
     {
         if (!frame) throw std::invalid_argument("Wind profile history requires a frame.");
         const auto slot = slotAt(count_);
@@ -74,7 +85,11 @@ public:
     }
 
 private:
-    std::vector<VerticalWindProfilePtr> slots_;
+    std::vector<std::shared_ptr<const Profile>> slots_;
     std::size_t head_ = 0;
     std::size_t count_ = 0;
 };
+
+
+using VerticalWindProfileHistory = WindProfileHistory<VerticalWindProfileUnit>;
+using NonuniformVerticalWindProfileHistory = WindProfileHistory<NonuniformVerticalWindProfileUnit>;

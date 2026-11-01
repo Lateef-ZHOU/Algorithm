@@ -35,6 +35,16 @@ target_link_libraries(my_app PRIVATE Lidar::Algorithm)
 
 从仓库提交列表选择固定版本；示例占位值必须替换，不使用浮动分支保证可复现。多个模块共用已有上游目标，应用若需覆盖上游版本应先统一声明并创建它们。标准 `FETCHCONTENT_SOURCE_DIR_LIDAR_模块名`（模块名大写无分隔）可用于本地开发，发布验证应取消覆盖并实际拉取远端。
 
+## 均匀与非均匀风廓线帧
+
+`VerticalWindProfileUnit` 保留原接口：时刻、起始高度、正层间距、ENU 向量数组。新增 `NonuniformVerticalWindProfileUnit`，按值持有时刻、`std::vector<double> heights` 和 `std::vector<LinAlg::Vec3> winds`；高度单位米、风向量单位米/秒，同下标对应同一层，不在每层向量内重复存高度或指针。
+
+两种帧分别通过 `shared_ptr<const ...>` 发布。发布前完成填充，此后不得通过其他可写份额改动数组。消费方在推送入口检查两数组等长、高度有限且严格递增；接收后信任该约定，不在后续索引读取时重复检查。算法数据类型不依赖 Qt 元类型或 QML 登记。
+
+`VerticalWindProfileHistory` 与 `NonuniformVerticalWindProfileHistory` 复用 `WindProfileHistory<Profile>`：容量内逐帧填充，容量满后覆盖最旧整帧，只保存只读共享份额，不复制高度或向量数组。线程同步仍由所属使用方负责。本次不改变已有均匀反演、虚拟风场采样和落盘格式，也不新增非均匀反演。
+
+2026-11-01 本地验证：Windows / MSVC / Qt 6.11.2，Release 严格警告构建、公开头独立编译和 CTest 1/1 通过，覆盖两类帧及整帧环的容量内填充、覆盖释放、数组对应关系。证据 `build/nonuniform-build.log` 与 `build/Testing/Temporary/LastTest.log`。本轮未重跑 Linux；未推送。
+
 ## 来源与许可
 
 从 [LiDAR_DataACQ](https://github.com/Lateef-ZHOU/LiDAR_DataACQ) 的模块分离提交 `94ad6f8` 提取；初始分仓保持运行逻辑，独立整理构建、验证与发布入口。

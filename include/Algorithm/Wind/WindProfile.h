@@ -39,8 +39,10 @@ namespace WindProfile
     };
 
     // 反演直接生成带到料时刻的只读整帧；层数组属于该帧，失败返回空份额。
-    [[nodiscard]] inline VerticalWindProfilePtr
-    Calc(const std::span<const Input> beams, const double gateSpacingMeters, const std::chrono::system_clock::time_point at)
+    namespace detail {
+    template<class MakeFrame>
+    [[nodiscard]] auto solve(std::span<const Input> beams, MakeFrame makeFrame)
+        -> decltype(makeFrame(0.0, qsizetype{}))
     {
         const int N = static_cast<int>(beams.size());
         if (N < kBeams) return {};
@@ -96,10 +98,8 @@ namespace WindProfile
         for (int i = 0; i < N; ++i) meanEl += beams[i].dir->elevation() * DEG_TO_RAD;
         meanEl /= N;
         const double sinEl = std::sin(meanEl);
-        auto result = std::make_shared<VerticalWindProfileUnit>(at,
-            RangeGate::rangeOf(0, gateSpacingMeters) * sinEl,
-            gateSpacingMeters * sinEl,
-            std::vector<LinAlg::Vec3>(nGates));
+        auto result = makeFrame(sinEl, nGates);
+        if (!result) return {};
         const double *pinvU = Pinv.constData() + 0 * N;
         const double *pinvV = Pinv.constData() + 1 * N;
         const double *pinvW = Pinv.constData() + 2 * N;
@@ -120,5 +120,34 @@ namespace WindProfile
             result->winds[k] = valid ? LinAlg::Vec3(uk, vk, wk) : LinAlg::Vec3::Empty();
         }
         return result;
+    }
+    } // namespace detail
+
+    [[nodiscard]] inline VerticalWindProfilePtr
+    Calc(std::span<const Input> beams, double step, std::chrono::system_clock::time_point at)
+    {
+        return detail::solve(beams, [=](double sinEl, qsizetype count) {
+            return std::make_shared<VerticalWindProfileUnit>(at, RangeGate::rangeOf(0, step) * sinEl,
+                step * sinEl, std::vector<LinAlg::Vec3>(count));
+        });
+    }
+
+    // 同一组波束按同一组斜距配对。高度使用这些实际位置，ENU 求解与均匀路径共用。
+    [[nodiscard]] inline NonuniformVerticalWindProfilePtr
+    Calc(std::span<const Input> beams, const QVector<double> &ranges, std::chrono::system_clock::time_point at)
+    {
+        return detail::solve(beams, [&](double sinEl, qsizetype count) -> std::shared_ptr<NonuniformVerticalWindProfileUnit> {
+            if (ranges.size() != count || !(sinEl > 0.0)) return {};
+            auto result = std::make_shared<NonuniformVerticalWindProfileUnit>();
+            result->at = at;
+            result->heights.reserve(count);
+            for (const double range : ranges) {
+                const double height = range * sinEl;
+                if (!std::isfinite(height) || (!result->heights.empty() && height <= result->heights.back())) return {};
+                result->heights.push_back(height);
+            }
+            result->winds.resize(count);
+            return result;
+        });
     }
 } // namespace WindProfile

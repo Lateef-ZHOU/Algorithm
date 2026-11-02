@@ -1,4 +1,6 @@
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -33,5 +35,13 @@ int main(int argc, char **argv)
     VerticalWindProfileHistory uniform(2);
     uniform.append(std::make_shared<const VerticalWindProfileUnit>(frame));
     if (uniform.latest()->heightAt(0) != 100) return 6;
+    std::array<WindProfile::Input, 4> beams;
+    for (int i = 0; i < 4; ++i)
+        beams[i] = {WorldModel(90.0 * i, 30.0), {1.0, 2.0, 3.0}};
+    const auto column3 = WindProfile::Calc(beams, QVector<double>{0, 15, 150}, now);
+    if (!column3 || column3->at != now || std::abs(column3->heights[2] - 75) > 1e-9
+        || std::abs(column3->winds[2].z() - 6) > 1e-9) return 7;
+    if (WindProfile::Calc(beams, QVector<double>{0, 15}, now)
+        || WindProfile::Calc(beams, QVector<double>{0, 15, 15}, now)) return 8;
     return 0;
 }

@@ -6,9 +6,9 @@
 #include <random>
 #include <vector>
 
-#include "Algorithm/Geometry/GimbalModel.h" // WorldModel（光束的世界朝向）
-#include "Algorithm/Wind/VerticalWindProfile.h" // 等高间隔 ENU 风场
-#include "Algorithm/Wind/RangeGate.h"       // 门 → 斜距，全仓一处
+#include "GimbalModel.h" // WorldModel（光束的世界朝向）
+#include "VerticalWindProfile.h" // 等高间隔 ENU 风场
+#include "RangeGate.h"       // 门 → 斜距，全仓一处
 
 // ============================================================
 // LidarForward —— 虚拟探测器的正向模型：风场 + 光束朝向 → 一帧功率谱

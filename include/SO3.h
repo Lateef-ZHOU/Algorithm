@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 
-#include "Algorithm/Geometry/Matrix.h" // LinAlg::Vec3 / Mat3 + 线性代数底座
+#include "Matrix.h" // LinAlg::Vec3 / Mat3 + 线性代数底座
 
 // ════════════════════════════════════════════════════════════
 // 【单位契约】全工程角量：**跨边界一律「角度(°)」，弧度只活在 SO(3) 内核**

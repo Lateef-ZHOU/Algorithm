@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "Algorithm/Geometry/SO3.h" // 朝向对象 + 流形工具；角量单位契约也写在那里
+#include "SO3.h" // 朝向对象 + 流形工具；角量单位契约也写在那里
 
 // GimbalModel.h — 云台的**位形模型**一族：Joint（关节）→ GimbalModel（关节链 + 正解）→
 // WorldModel{az,el,roll} / PanTiltModel{pan,tilt}（各自的反解）。

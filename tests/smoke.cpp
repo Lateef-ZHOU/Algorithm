@@ -5,8 +5,8 @@
 #include <type_traits>
 #include <vector>
 #include <QCoreApplication>
-#include "Algorithm/Wind/WindProfile.h"
-#include "Algorithm/Sim/LidarForward.h"
+#include "WindProfile.h"
+#include "LidarForward.h"
 using RxTime = std::chrono::system_clock::time_point;
 int main(int argc, char **argv)
 {

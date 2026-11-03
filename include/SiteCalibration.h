@@ -4,7 +4,7 @@
 #include <QList>
 #include <QVector>
 
-#include "Algorithm/Geometry/SO3.h"
+#include "SO3.h"
 
 // ============================================================
 // SiteCalibration — 站点标定（手眼标定 AX=XB，分离地基与手机偏差）

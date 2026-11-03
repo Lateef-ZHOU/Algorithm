@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
-#include "Algorithm/Wind/VerticalWindProfile.h"
+#include "VerticalWindProfile.h"
 
 // 虚拟风场的输入工厂。人工输入采用水平风速/气象来向，进入帧时转为 ENU。
 // 场为水平均匀、仅随高度变化；插值和覆盖外取端值统一由风廓线帧实现。

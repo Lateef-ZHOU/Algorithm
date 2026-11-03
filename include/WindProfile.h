@@ -5,9 +5,9 @@
 #include <span>
 #include <QVector>
 
-#include "Algorithm/Wind/RangeGate.h"
-#include "Algorithm/Wind/VerticalWindProfile.h"
-#include "Algorithm/Geometry/GimbalModel.h"
+#include "RangeGate.h"
+#include "VerticalWindProfile.h"
+#include "GimbalModel.h"
 
 // ============================================================
 // WindProfile — 多波束径向风反演风廓线

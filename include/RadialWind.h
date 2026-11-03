@@ -5,7 +5,7 @@
 #include <QVector>
 #include <QtGlobal>
 
-#include "Algorithm/Wind/GaussFit.h"
+#include "GaussFit.h"
 
 // ============================================================
 // RadialWind — 功率谱 → 逐距离门的径向风速 + CNR

@@ -1,5 +1,7 @@
 # Algorithm
 
+2026-11-10 用户定（二维线性数组）：新增 `LinearArray2D<T>`（继承 std::vector<T> 的行主序长扁平数组，带 rows/columns 与行、列两条轴的起点和步长；`rowPosition`、`columnPosition`、`row`、`sameAxes`、`axes`、`complete`、`hasValidAxes`）。`RadialWind::Calc(spectrum, metersPerSecondPerMHz, zeroWindMHz)` 直接收二维功率谱（列轴为频率 MHz），返回轴取行轴（斜距）的 `LinearArray` 风速与 CNR；带内判据为 `RadialWind::inBand`。
+
 2026-11-10 用户定（波长与抽稀）：新增 `RadialWind::metersPerSecondPerMHz(λ) = λ/2 × 10⁶`（相干多普勒 v = λ·f_D/2，1550 nm → 0.775 m/s/MHz）。
 
 几何换算、径向风与风廓线反演、风场和谱合成的数学工具。Windows / Linux，C++20，CMake ≥ 3.28。

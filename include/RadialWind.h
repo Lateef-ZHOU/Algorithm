@@ -2,11 +2,12 @@
 #include <cmath>
 #include <numbers>
 #include <utility>
+#include <limits>
 #include <vector>
-#include <QVector>
 #include <QtGlobal>
 
 #include "GaussFit.h"
+#include "LinearArray.h"
 
 // ============================================================
 // RadialWind — 功率谱 → 逐距离门的径向风速 + CNR
@@ -20,7 +21,7 @@
 // 由调用方传入，与哪张卡、几个通道无关。两张卡的 worker（HfnlWorker / LidarQWorker）用的是
 // 同一份，故与 GaussFit / WindProfile 并列住算法层，而不是在每个型号夹里各放一份数值代码。
 //
-// 谱统一是 double 列表；算法不依赖图形库，也不把小数高度转回计数。
+// 谱为二维线性数组（行 = 距离门、列 = 频点）；算法不依赖图形库，也不把小数高度转回计数。
 // ============================================================
 namespace RadialWind
 {
@@ -30,23 +31,36 @@ namespace RadialWind
     return wavelengthM / 2.0 * 1e6;
 }
 
-// 一帧的两列产物（逐门数值；距离轴由调用方的通道规格给出）。
+// 零风速参考落在功率谱频率轴（列轴，MHz）的覆盖范围内才能换算风速。
+[[nodiscard]] inline bool inBand(const LinearArray2D<double> &spectrum, const double zeroWindMHz) noexcept
+{
+    return spectrum.columns > 0 && spectrum.columnStep > 0.0 && zeroWindMHz >= spectrum.columnPosition(0)
+           && zeroWindMHz <= spectrum.columnPosition(spectrum.columns - 1);
+}
+
+// 一帧的两列产物：轴取功率谱的行轴（斜距）。
 struct Result
 {
-    std::vector<double> ws;  ///< 每门径向风速（长度 = rows）
-    std::vector<double> cnr; ///< 每门 CNR（dB，长度 = rows）
+    LinearArray<double> ws;  ///< 每门径向风速（m/s）；零风速参考不在频带内时为 NaN
+    LinearArray<double> cnr; ///< 每门 CNR（dB）
 };
 
-// spec 行主序 rows × cols；slope/intercept 为频率 bin → 风速（m/s）的线性换算。
+// spectrum 行 = 距离门、列 = 频点（列轴单位 MHz）。峰位按列轴换成频率，减零风速参考后乘 λ/2 系数得风速。
+// 网格不完整或轴无效时返回空数组。
 [[nodiscard]] inline Result
-Calc(const QVector<double> &spec,
-     const int rows, const int cols, const double slope, const double intercept)
+Calc(const LinearArray2D<double> &spectrum, const double metersPerSecondPerMHz, const double zeroWindMHz)
 {
-    const double *const buf = spec.constData();
-    std::vector<double> ws(rows);
-    std::vector<double> cnr(rows);
-    double *const wsOut = ws.data(); // 循环前取写指针，omp 体内只按下标写
-    double *const cnrOut = cnr.data();
+    if (!spectrum.complete() || !spectrum.hasValidAxes() || spectrum.columns < 2)
+        return {};
+    const int rows = spectrum.rows, cols = spectrum.columns;
+    const double slope = spectrum.columnStep * metersPerSecondPerMHz;
+    const double intercept = inBand(spectrum, zeroWindMHz) ? (spectrum.columnStart - zeroWindMHz) * metersPerSecondPerMHz
+                                                           : std::numeric_limits<double>::quiet_NaN();
+    Result result{LinearArray<double>(spectrum.rowStart, spectrum.rowStep, std::vector<double>(rows)),
+                  LinearArray<double>(spectrum.rowStart, spectrum.rowStep, std::vector<double>(rows))};
+    const double *const buf = spectrum.data();
+    double *const wsOut = result.ws.data(); // 循环前取写指针，omp 体内只按下标写
+    double *const cnrOut = result.cnr.data();
 #pragma omp parallel for
     for (int row = 0; row < rows; ++row)
     {
@@ -57,6 +71,6 @@ Calc(const QVector<double> &spec,
         wsOut[row] = p.x0 * slope + intercept;
         cnrOut[row] = noise > 1e-30 ? 10.0 * std::log10(signal / noise) : 0.0;
     }
-    return {std::move(ws), std::move(cnr)}; // 拥有型交付：move 归对（非 const 局部，move 合法）
+    return result;
 }
 } // namespace RadialWind

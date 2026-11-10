@@ -7,27 +7,19 @@
 #include <vector>
 #include <chrono>
 
+#include "LinearArray.h"
 #include "Matrix.h"
 
-// 一个时刻的等高间隔风廓线。起始高度和正层间距以米为单位，ENU 为东、北、上（米/秒）。
+// 一个时刻的等高间隔风廓线：winds 的第 i 层位于高度 winds.positionAt(i)（米），ENU 为东、北、上（米/秒）。
 // 数组按值属于本帧；发布后通过 const 份额共享，不另存高度数组、风速或风向。
 struct VerticalWindProfileUnit
 {
     std::chrono::system_clock::time_point at;
-    double startHeightM;
-    double heightStepM;
-    std::vector<LinAlg::Vec3> winds;
+    LinearArray<LinAlg::Vec3> winds;
 
     [[nodiscard]] bool hasValidGrid() const
     {
-        return !winds.empty() && std::isfinite(startHeightM) && std::isfinite(heightStepM)
-               && heightStepM > 0.0 && std::isfinite(heightAt(winds.size() - 1));
-    }
-
-    // 调用者给出有效下标；单层仍保存采样间距，计算不依赖层数，也不做除法。
-    [[nodiscard]] double heightAt(const std::size_t index) const
-    {
-        return startHeightM + static_cast<double>(index) * heightStepM;
+        return !winds.empty() && winds.hasValidAxis() && std::isfinite(winds.positionAt(winds.size() - 1));
     }
 
     // 按均匀网格直接定位相邻样本，以 ENU 分量线性插值；覆盖外取端值。
@@ -35,14 +27,14 @@ struct VerticalWindProfileUnit
     [[nodiscard]] LinAlg::Vec3 windAt(const double heightM) const
     {
         if (!hasValidGrid() || !std::isfinite(heightM)) return LinAlg::Vec3::Empty();
-        if (heightM <= startHeightM || winds.size() == 1) return winds.front();
-        if (heightM >= heightAt(winds.size() - 1)) return winds.back();
-        const double position = (heightM - startHeightM) / heightStepM;
+        if (heightM <= winds.start || winds.size() == 1) return winds.front();
+        if (heightM >= winds.positionAt(winds.size() - 1)) return winds.back();
+        const double position = (heightM - winds.start) / winds.step;
         const auto low = static_cast<std::size_t>(position);
         if (low >= winds.size() - 1) return winds.back(); // 端点附近可能舍入到末下标。
         // 用同一高度映射识别节点，避免小数步长的反算舍入把精确落点误当作插值。
-        if (heightM == heightAt(low)) return winds[low];
-        if (heightM == heightAt(low + 1)) return winds[low + 1];
+        if (heightM == winds.positionAt(low)) return winds[low];
+        if (heightM == winds.positionAt(low + 1)) return winds[low + 1];
         const double fraction = position - static_cast<double>(low);
         return winds[low] * (1.0 - fraction) + winds[low + 1] * fraction;
     }

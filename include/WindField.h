@@ -34,7 +34,7 @@ namespace WindField
         const auto low = velocity(speedAtGround, dirAtGroundDeg, vertical);
         const auto high = velocity(speedAtGround + speedGainPerKm * km, dirAtGroundDeg + dirGainPerKm * km, vertical);
         for (std::size_t i = 0; i < profile.winds.size(); ++i) {
-            const double fraction = std::clamp(profile.heightAt(i) / topM, 0.0, 1.0);
+            const double fraction = std::clamp(profile.winds.positionAt(i) / topM, 0.0, 1.0);
             profile.winds[i] = low * (1.0 - fraction) + high * fraction;
         }
         return profile;

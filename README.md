@@ -35,15 +35,16 @@ target_link_libraries(my_app PRIVATE Lidar::Algorithm)
 
 从仓库提交列表选择固定版本；示例占位值必须替换，不使用浮动分支保证可复现。多个模块共用已有上游目标，应用若需覆盖上游版本应先统一声明并创建它们。标准 `FETCHCONTENT_SOURCE_DIR_LIDAR_模块名`（模块名大写无分隔）可用于本地开发，发布验证应取消覆盖并实际拉取远端。
 
-## 风廓线帧与斜距约定
+## 线性数组与风廓线帧
 
-`VerticalWindProfileUnit`：时刻、起始高度、正层间距、ENU 向量数组；`VerticalWindProfileHistory` 为定长整帧环，满后覆盖最旧帧，只保存只读共享份额。
+`LinearArray<T>`（`LinearArray.h`）继承 `std::vector<T>`，另带 `start`、`step`：第 i 个元素位于 `positionAt(i) = start + i·step`；`hasValidAxis()` 要求两者有限且步长为正，`sameAxis()` 比较起点、步长与个数。凡是传达"等间隔位置 + 逐点数值"的签名都用它表达。
 
-斜距约定只写在 `RangeGate::rangeOf(gate, start, spacing) = start + gate·spacing`：起点由各卡通道规格显式给出（2026-11-10 用户定：现有各卡都以每门起点为坐标，第 0 门在 0 m）。`WindProfile::Calc(beams, startM, stepM, at)` 复用四束 ENU 求解，高度起点 = 起点 × sin(平均仰角)，层间距 = 门距 × sin(平均仰角)；门距非正或仰角不在水平面之上返回空。`LidarForward::Detector` 同样带门起点 `gateStartM`。
+- `VerticalWindProfileUnit{at, LinearArray<Vec3> winds}`：第 i 层高度 = `winds.positionAt(i)`；`VerticalWindProfileHistory` 为定长整帧环。
+- `WindProfile::Input{dir, LinearArray<double> ws}`：`ws` 的轴是斜距。`Calc(beams, at)` 要求各束同一斜距网格，高度起点与层距 = 斜距起点与门距 × sin(平均仰角)。
+- `RadialWind::Result` 为逐门 `std::vector<double>`，距离轴由调用方的通道规格给出。
+- 斜距约定：起点由各卡通道规格显式给出（现有各卡第 0 门在 0 m）；`LidarForward::Detector` 只有门起点与门距两个数，就地按 起点 + k·门距 计算。`RangeGate.h` 已删除。
 
-2026-11-10 起删除非均匀风廓线帧 `NonuniformVerticalWindProfileUnit`、其历史环与按逐门斜距的 `Calc(ranges)`：所有采集卡的距离与频率都是等间隔。验证：Windows / MSVC / Qt 6.11.2，build-1110 Release 严格警告零诊断、公开头独立编译、CTest 1/1。
-
-2026-11-01 本地验证：Windows / MSVC / Qt 6.11.2，Release 严格警告构建、公开头独立编译和 CTest 1/1 通过，覆盖两类帧及整帧环的容量内填充、覆盖释放、数组对应关系。证据 `build/nonuniform-build.log` 与 `build/Testing/Temporary/LastTest.log`。本轮未重跑 Linux；未推送。
+2026-11-10 验证：Windows / MSVC / Qt 6.11.2，build-1110 Release /W4 /WX 零诊断、公开头独立编译、CTest 1/1。
 
 ## 来源与许可
 

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <numbers>
 #include <utility>
+#include <vector>
 #include <QVector>
 #include <QtGlobal>
 
@@ -23,11 +24,11 @@
 // ============================================================
 namespace RadialWind
 {
-// 一帧的两列产物（裸值对：QVector 是 COW 值类，不套指针壳）。
+// 一帧的两列产物（逐门数值；距离轴由调用方的通道规格给出）。
 struct Result
 {
-    QVector<double> ws;  ///< 每门径向风速（长度 = rows）
-    QVector<double> cnr; ///< 每门 CNR（dB，长度 = rows）
+    std::vector<double> ws;  ///< 每门径向风速（长度 = rows）
+    std::vector<double> cnr; ///< 每门 CNR（dB，长度 = rows）
 };
 
 // spec 行主序 rows × cols；slope/intercept 为频率 bin → 风速（m/s）的线性换算。
@@ -36,10 +37,10 @@ Calc(const QVector<double> &spec,
      const int rows, const int cols, const double slope, const double intercept)
 {
     const double *const buf = spec.constData();
-    QVector<double> ws(rows);
-    QVector<double> cnr(rows);
-    double *const wsOut = ws.data();   // 循环前取写指针：detach 检查一次在此，omp 体内零 COW 判
-    double *const cnrOut = cnr.data(); // （各卡提取谱时也只在循环前取一次 data）
+    std::vector<double> ws(rows);
+    std::vector<double> cnr(rows);
+    double *const wsOut = ws.data(); // 循环前取写指针，omp 体内只按下标写
+    double *const cnrOut = cnr.data();
 #pragma omp parallel for
     for (int row = 0; row < rows; ++row)
     {

@@ -5,7 +5,7 @@
 #include <span>
 #include <QVector>
 
-#include "RangeGate.h"
+#include "LinearArray.h"
 #include "VerticalWindProfile.h"
 #include "GimbalModel.h"
 
@@ -35,14 +35,14 @@ namespace WindProfile
         /// **参考系由类型钉住**：只收 `WorldModel`，由编排层经云台族口 `worldOf` 换好再交——
         /// 收一袋裸数的话，喂进来的若是云台角，基座一歪就指错且不响。
         std::optional<WorldModel> dir;
-        QVector<double> ws; ///< 该波束径向风速（每门一个；COW 值类，裸值自持）
+        LinearArray<double> ws; ///< 该波束逐门径向风速；轴为斜距（第 k 门 = ws.positionAt(k)，米）
     };
 
     // 反演直接生成带到料时刻的只读整帧；层数组属于该帧，失败返回空份额。
     namespace detail {
     template<class MakeFrame>
     [[nodiscard]] auto solve(std::span<const Input> beams, MakeFrame makeFrame)
-        -> decltype(makeFrame(0.0, qsizetype{}))
+        -> decltype(makeFrame(beams[0].ws, 0.0, qsizetype{}))
     {
         const int N = static_cast<int>(beams.size());
         if (N < kBeams) return {};
@@ -82,11 +82,12 @@ namespace WindProfile
                 Pinv[r * N + i] = val;
             }
 
-        const int nGates = beams[0].ws.size(); // ws 是裸值、必在；空列即 0 门
-        if (nGates == 0) return {};
+        // 各束须在同一斜距网格上（起点、门距、门数都相同）。
+        const int nGates = static_cast<int>(beams[0].ws.size());
+        if (nGates == 0 || !beams[0].ws.hasValidAxis()) return {};
         for (int i = 1; i < N; ++i)
         {
-            if (beams[i].ws.size() != nGates) return {};
+            if (!beams[i].ws.sameAxis(beams[0].ws)) return {};
         }
 
         // 高度 = 斜距 × **sin**(高度角)。高度角自水平面起、抬头为正（WorldModel 的 el），
@@ -98,7 +99,7 @@ namespace WindProfile
         for (int i = 0; i < N; ++i) meanEl += beams[i].dir->elevation() * DEG_TO_RAD;
         meanEl /= N;
         const double sinEl = std::sin(meanEl);
-        auto result = makeFrame(sinEl, nGates);
+        auto result = makeFrame(beams[0].ws, sinEl, nGates);
         if (!result) return {};
         const double *pinvU = Pinv.constData() + 0 * N;
         const double *pinvV = Pinv.constData() + 1 * N;
@@ -123,15 +124,15 @@ namespace WindProfile
     }
     } // namespace detail
 
-    // 斜距网格为 起点 + k·门距：高度起点 = 起点 × sin(平均仰角)，层间距 = 门距 × sin(平均仰角)。
-    // 门距非正或平均仰角不在水平面之上时高度网格无效，返回空。
+    // 高度网格由斜距网格换算：起点 × sin(平均仰角)、门距 × sin(平均仰角)。平均仰角不在水平面之上时返回空。
     [[nodiscard]] inline VerticalWindProfilePtr
-    Calc(std::span<const Input> beams, double startM, double stepM, std::chrono::system_clock::time_point at)
+    Calc(std::span<const Input> beams, std::chrono::system_clock::time_point at)
     {
-        return detail::solve(beams, [=](double sinEl, qsizetype count) -> std::shared_ptr<VerticalWindProfileUnit> {
-            if (!(stepM > 0.0) || !(sinEl > 0.0)) return {};
-            return std::make_shared<VerticalWindProfileUnit>(at, RangeGate::rangeOf(0, startM, stepM) * sinEl,
-                stepM * sinEl, std::vector<LinAlg::Vec3>(count));
+        return detail::solve(beams, [=](const LinearArray<double> &ranges, double sinEl, qsizetype count)
+                                        -> std::shared_ptr<VerticalWindProfileUnit> {
+            if (!(sinEl > 0.0)) return {};
+            return std::make_shared<VerticalWindProfileUnit>(VerticalWindProfileUnit{
+                at, LinearArray<LinAlg::Vec3>(ranges.start * sinEl, ranges.step * sinEl, std::vector<LinAlg::Vec3>(count))});
         });
     }
 } // namespace WindProfile

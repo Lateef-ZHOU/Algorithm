@@ -14,7 +14,7 @@
 // LidarForward —— 虚拟探测器的正向模型：风场 + 光束朝向 → 一帧功率谱
 //
 // 反演链（GaussFit → RadialWind → WindProfile）怎么读谱，本模型就怎么写谱，两边同一套口径：
-//   · 逐门：第 k 门的斜距 R = RangeGate::rangeOf(k, 门距)，离地高度 z = R·sin(高度角)，光束单位矢量
+//   · 逐门：第 k 门的斜距 R = RangeGate::rangeOf(k, 门起点, 门距)，离地高度 z = R·sin(高度角)，光束单位矢量
 //     d = (sin az·cos el, cos az·cos el, sin el)（ENU，与 WindProfile 设计矩阵那一行同式），
 //     径向风 v_r = wind(z)·d，正 = 远离雷达。
 //   · 频点：x₀ = (v_r − intercept) / slope，与 RadialWind 的 ws = x₀·slope + intercept 互逆。
@@ -40,6 +40,7 @@ namespace LidarForward
     {
         int rows;                 // 距离门数
         int cols;                 // 频点数
+        double gateStartM;        // 第 0 门的斜距（m）
         double gateSpacingM;      // 门距（m）
         double freq2WsSlope;      // 频点 → m/s
         double freq2WsIntercept;  // 第 0 频点对应的 m/s
@@ -87,11 +88,11 @@ namespace LidarForward
     }
 
     // 第 k 门的真值径向风（m/s）。高度取 R·sin(el)，与风廓线的高度口径一致。
-    [[nodiscard]] inline double radialWind(const VerticalWindProfileUnit &field, const WorldModel &beam, const double gateSpacingM,
-                                           const int gate)
+    [[nodiscard]] inline double radialWind(const VerticalWindProfileUnit &field, const WorldModel &beam, const double gateStartM,
+                                           const double gateSpacingM, const int gate)
     {
         const LinAlg::Vec3 d = beamVector(beam);
-        const double range = RangeGate::rangeOf(gate, gateSpacingM);
+        const double range = RangeGate::rangeOf(gate, gateStartM, gateSpacingM);
         return LinAlg::Vec3::dot(field.windAt(range * d.z()), d);
     }
 
@@ -118,11 +119,11 @@ namespace LidarForward
         const double d = det.floorCounts;
         for (int k = 0; k < det.rows; ++k)
         {
-            const double vr = radialWind(field, beam, det.gateSpacingM, k);
+            const double vr = radialWind(field, beam, det.gateStartM, det.gateSpacingM, k);
             // 频点位置。超出频带的速度钳在带边：真机是混叠，这里先不模拟。
             const double x0 = std::clamp((vr - det.freq2WsIntercept) / det.freq2WsSlope, 0.0, det.cols - 1.0);
             const double cnr =
-                std::pow(10.0, cnrDb(det, RangeGate::rangeOf(k, det.gateSpacingM), penaltyDb) / 10.0);
+                std::pow(10.0, cnrDb(det, RangeGate::rangeOf(k, det.gateStartM, det.gateSpacingM), penaltyDb) / 10.0);
             const double A = cnr * d * det.cols / (std::sqrt(2.0 * std::numbers::pi) * w);
             std::uint64_t *row = out.data() + static_cast<std::size_t>(k) * static_cast<std::size_t>(det.cols);
             for (int i = 0; i < det.cols; ++i)

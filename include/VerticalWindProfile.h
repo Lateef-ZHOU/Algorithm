@@ -50,16 +50,6 @@ struct VerticalWindProfileUnit
 
 using VerticalWindProfilePtr = std::shared_ptr<const VerticalWindProfileUnit>;
 
-// 非均匀整帧：高度与风矢量分数组连续保存。同下标对应同一层。
-// 消费入口只在接收时检查等长、有限且递增的高度；发布后生产者不得修改任一数组。
-struct NonuniformVerticalWindProfileUnit
-{
-    std::chrono::system_clock::time_point at;
-    std::vector<double> heights;
-    std::vector<LinAlg::Vec3> winds;
-};
-using NonuniformVerticalWindProfilePtr = std::shared_ptr<const NonuniformVerticalWindProfileUnit>;
-
 // 定长历史：只保存完整帧的只读份额，满后覆盖最旧槽；同步由所属线程/使用方负责。
 template <class Profile>
 class WindProfileHistory
@@ -92,4 +82,3 @@ private:
 
 
 using VerticalWindProfileHistory = WindProfileHistory<VerticalWindProfileUnit>;
-using NonuniformVerticalWindProfileHistory = WindProfileHistory<NonuniformVerticalWindProfileUnit>;

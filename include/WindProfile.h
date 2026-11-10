@@ -123,31 +123,15 @@ namespace WindProfile
     }
     } // namespace detail
 
+    // 斜距网格为 起点 + k·门距：高度起点 = 起点 × sin(平均仰角)，层间距 = 门距 × sin(平均仰角)。
+    // 门距非正或平均仰角不在水平面之上时高度网格无效，返回空。
     [[nodiscard]] inline VerticalWindProfilePtr
-    Calc(std::span<const Input> beams, double step, std::chrono::system_clock::time_point at)
+    Calc(std::span<const Input> beams, double startM, double stepM, std::chrono::system_clock::time_point at)
     {
-        return detail::solve(beams, [=](double sinEl, qsizetype count) {
-            return std::make_shared<VerticalWindProfileUnit>(at, RangeGate::rangeOf(0, step) * sinEl,
-                step * sinEl, std::vector<LinAlg::Vec3>(count));
-        });
-    }
-
-    // 同一组波束按同一组斜距配对。高度使用这些实际位置，ENU 求解与均匀路径共用。
-    [[nodiscard]] inline NonuniformVerticalWindProfilePtr
-    Calc(std::span<const Input> beams, const QVector<double> &ranges, std::chrono::system_clock::time_point at)
-    {
-        return detail::solve(beams, [&](double sinEl, qsizetype count) -> std::shared_ptr<NonuniformVerticalWindProfileUnit> {
-            if (ranges.size() != count || !(sinEl > 0.0)) return {};
-            auto result = std::make_shared<NonuniformVerticalWindProfileUnit>();
-            result->at = at;
-            result->heights.reserve(count);
-            for (const double range : ranges) {
-                const double height = range * sinEl;
-                if (!std::isfinite(height) || (!result->heights.empty() && height <= result->heights.back())) return {};
-                result->heights.push_back(height);
-            }
-            result->winds.resize(count);
-            return result;
+        return detail::solve(beams, [=](double sinEl, qsizetype count) -> std::shared_ptr<VerticalWindProfileUnit> {
+            if (!(stepM > 0.0) || !(sinEl > 0.0)) return {};
+            return std::make_shared<VerticalWindProfileUnit>(at, RangeGate::rangeOf(0, startM, stepM) * sinEl,
+                stepM * sinEl, std::vector<LinAlg::Vec3>(count));
         });
     }
 } // namespace WindProfile

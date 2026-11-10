@@ -24,6 +24,12 @@
 // ============================================================
 namespace RadialWind
 {
+// 相干多普勒测风：径向风速 v = λ·f_D / 2，每 MHz 频移对应 λ/2 × 10⁶ m/s（λ 以米计；1550 nm → 0.775）。
+[[nodiscard]] constexpr double metersPerSecondPerMHz(const double wavelengthM) noexcept
+{
+    return wavelengthM / 2.0 * 1e6;
+}
+
 // 一帧的两列产物（逐门数值；距离轴由调用方的通道规格给出）。
 struct Result
 {

@@ -1,5 +1,7 @@
 # Algorithm
 
+2026-11-10 用户定（波长与抽稀）：新增 `RadialWind::metersPerSecondPerMHz(λ) = λ/2 × 10⁶`（相干多普勒 v = λ·f_D/2，1550 nm → 0.775 m/s/MHz）。
+
 几何换算、径向风与风廓线反演、风场和谱合成的数学工具。Windows / Linux，C++20，CMake ≥ 3.28。
 
 ## 边界与依赖

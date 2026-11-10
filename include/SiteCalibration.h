@@ -43,7 +43,7 @@
 // 的转换由调用方按云台模型（PanTiltModel / WorldModel 的 toOrientation）先做好再喂进来。
 // **measured 必须是全朝向**（方位 / 高度 / 翻滚三个角都要）：算法吃的是相邻两点之间的相对转动，
 // 只有指向的两个角拼不出来。样本按运动顺序传入（相邻相对旋转避免接近 180°，否则旋转向量轴向
-// 不可靠）。声明 / 定义分开，inline 类外（header-only，单文件）。
+// 不可靠）。成员函数在类内定义（header-only，单文件）。
 // **目前全仓没有调用点**：标定页尚未接线，本类是备好的算法。
 // ============================================================
 class SiteCalibration
@@ -65,84 +65,78 @@ public:
     };
 
     // N<3 / 旋转求解退化 → ok=false。
-    [[nodiscard]] static Estimate estimateFromSamples(const QList<Sample> &samples);
-};
-
-// ============================================================
-// SiteCalibration — inline 实现（类外，header-only）
-// ============================================================
-
-inline SiteCalibration::Estimate SiteCalibration::estimateFromSamples(const QList<Sample> &samples)
-{
-    using namespace LinAlg;
-    Estimate res;
-    const int N = samples.size();
-    if (N < 3) return res;
-
-    QVector<Mat3> Rm(N), Rg(N); // 各点：手机实测旋转 / 云台已知旋转（SO3 切到 Mat3 做线代）
-    for (int i = 0; i < N; ++i)
+    [[nodiscard]] static Estimate estimateFromSamples(const QList<Sample> &samples)
     {
-        Rm[i] = samples[i].measured;
-        Rg[i] = samples[i].gimbal;
-    }
+        using namespace LinAlg;
+        Estimate res;
+        const int N = samples.size();
+        if (N < 3) return res;
 
-    // ① 手眼解 R_offset：相邻对的相对旋转向量 b = R_off·a，累加 Wahba 阵 M = Σ b·aᵀ。
-    Mat3 M = Mat3::Zeros();
-    for (int i = 0; i + 1 < N; ++i)
-    {
-        const Vec3 a = SO3::logRotation(Rm[i].transpose() * Rm[i + 1]);
-        const Vec3 b = SO3::logRotation(Rg[i].transpose() * Rg[i + 1]);
-        const double bv[3] = {b.x(), b.y(), b.z()};
-        const double av[3] = {a.x(), a.y(), a.z()};
-        for (int r = 0; r < 3; ++r) // M += b·aᵀ（外积累加）
-            for (int c = 0; c < 3; ++c)
-                M(r, c) += bv[r] * av[c];
-    }
-    // 补秩（道理见文件头 ①）：M += cof(M) / ‖M‖。余因子阵的第 i 行 = M 另外两行的叉积（轮换序）。
-    {
-        const Vec3 r0{M(0, 0), M(0, 1), M(0, 2)}, r1{M(1, 0), M(1, 1), M(1, 2)}, r2{M(2, 0), M(2, 1), M(2, 2)};
-        const Vec3 cof[3] = {Vec3::cross(r1, r2), Vec3::cross(r2, r0), Vec3::cross(r0, r1)};
-        const double scale = std::sqrt(r0.norm2() + r1.norm2() + r2.norm2()); // ‖M‖（Frobenius 范数）
-        if (scale > 0.0)
+        QVector<Mat3> Rm(N), Rg(N); // 各点：手机实测旋转 / 云台已知旋转（SO3 切到 Mat3 做线代）
+        for (int i = 0; i < N; ++i)
+        {
+            Rm[i] = samples[i].measured;
+            Rg[i] = samples[i].gimbal;
+        }
+
+        // ① 手眼解 R_offset：相邻对的相对旋转向量 b = R_off·a，累加 Wahba 阵 M = Σ b·aᵀ。
+        Mat3 M = Mat3::Zeros();
+        for (int i = 0; i + 1 < N; ++i)
+        {
+            const Vec3 a = SO3::logRotation(Rm[i].transpose() * Rm[i + 1]);
+            const Vec3 b = SO3::logRotation(Rg[i].transpose() * Rg[i + 1]);
+            const double bv[3] = {b.x(), b.y(), b.z()};
+            const double av[3] = {a.x(), a.y(), a.z()};
+            for (int r = 0; r < 3; ++r) // M += b·aᵀ（外积累加）
+                for (int c = 0; c < 3; ++c)
+                    M(r, c) += bv[r] * av[c];
+        }
+        // 补秩（道理见文件头 ①）：M += cof(M) / ‖M‖。余因子阵的第 i 行 = M 另外两行的叉积（轮换序）。
+        {
+            const Vec3 r0{M(0, 0), M(0, 1), M(0, 2)}, r1{M(1, 0), M(1, 1), M(1, 2)}, r2{M(2, 0), M(2, 1), M(2, 2)};
+            const Vec3 cof[3] = {Vec3::cross(r1, r2), Vec3::cross(r2, r0), Vec3::cross(r0, r1)};
+            const double scale = std::sqrt(r0.norm2() + r1.norm2() + r2.norm2()); // ‖M‖（Frobenius 范数）
+            if (scale > 0.0)
+                for (int r = 0; r < 3; ++r)
+                {
+                    M(r, 0) += cof[r].x() / scale;
+                    M(r, 1) += cof[r].y() / scale;
+                    M(r, 2) += cof[r].z() / scale;
+                }
+        }
+        Mat3 Roff = Mat3::Identity();
+        const Mat3 cand = SO3::nearestRotation(M);
+        if (cand.determinant() > 0.5) // 至少两个不平行的转轴 → 采纳；转轴全共线（秩 1，补不出来）→ 退回 I
+        {
+            Roff = cand;
+            res.offsetResolved = true;
+        }
+
+        // ② 回代旋转平均求 R_base：S = Σ R_meas_i·(R_gimbal_i·R_off)ᵀ，投影回 SO(3)。
+        Mat3 S = Mat3::Zeros();
+        for (int i = 0; i < N; ++i)
+        {
+            const Mat3 Rbi = Rm[i] * (Rg[i] * Roff).transpose();
             for (int r = 0; r < 3; ++r)
-            {
-                M(r, 0) += cof[r].x() / scale;
-                M(r, 1) += cof[r].y() / scale;
-                M(r, 2) += cof[r].z() / scale;
-            }
-    }
-    Mat3 Roff = Mat3::Identity();
-    const Mat3 cand = SO3::nearestRotation(M);
-    if (cand.determinant() > 0.5) // 至少两个不平行的转轴 → 采纳；转轴全共线（秩 1，补不出来）→ 退回 I
-    {
-        Roff = cand;
-        res.offsetResolved = true;
-    }
+                for (int c = 0; c < 3; ++c)
+                    S(r, c) += Rbi(r, c);
+        }
+        const Mat3 Rbase = SO3::nearestRotation(S);
+        if (Rbase.determinant() < 0.5) return res; // 求和退化（朝向自相矛盾）→ 失败
 
-    // ② 回代旋转平均求 R_base：S = Σ R_meas_i·(R_gimbal_i·R_off)ᵀ，投影回 SO(3)。
-    Mat3 S = Mat3::Zeros();
-    for (int i = 0; i < N; ++i)
-    {
-        const Mat3 Rbi = Rm[i] * (Rg[i] * Roff).transpose();
-        for (int r = 0; r < 3; ++r)
-            for (int c = 0; c < 3; ++c)
-                S(r, c) += Rbi(r, c);
-    }
-    const Mat3 Rbase = SO3::nearestRotation(S);
-    if (Rbase.determinant() < 0.5) return res; // 求和退化（朝向自相矛盾）→ 失败
+        // ③ 残差：predicted = R_base·R_gimbal_i·R_off，与实测的失配旋转取角，RMS。
+        double sse = 0.0;
+        for (int i = 0; i < N; ++i)
+        {
+            const Mat3 err = (Rbase * Rg[i] * Roff).transpose() * Rm[i];
+            const double ang = SO3::logRotation(err).norm(); // 失配角（弧度）
+            sse += ang * ang;
+        }
 
-    // ③ 残差：predicted = R_base·R_gimbal_i·R_off，与实测的失配旋转取角，RMS。
-    double sse = 0.0;
-    for (int i = 0; i < N; ++i)
-    {
-        const Mat3 err = (Rbase * Rg[i] * Roff).transpose() * Rm[i];
-        const double ang = SO3::logRotation(err).norm(); // 失配角（弧度）
-        sse += ang * ang;
+        res.base = SO3::fromApprox(Rbase);   // Rbase/Roff 已是 nearestRotation 输出(正交)，
+        res.offset = SO3::fromApprox(Roff);   // fromApprox 再投影一次幂等、安全(不走裸构造)
+        res.residualDeg = std::sqrt(sse / N) * (180.0 / std::numbers::pi);
+        res.ok = true;
+        return res;
     }
-
-    res.base = SO3::fromApprox(Rbase);   // Rbase/Roff 已是 nearestRotation 输出(正交)，
-    res.offset = SO3::fromApprox(Roff);   // fromApprox 再投影一次幂等、安全(不走裸构造)
-    res.residualDeg = std::sqrt(sse / N) * (180.0 / std::numbers::pi);
-    res.ok = true;
-    return res;
-}
+};

@@ -27,7 +27,7 @@
 // （expmap / nearestRotation / logRotation）作静态方法。**"作动量↔朝向"的换算不在这里——它依赖装配，
 // 交给 GimbalModel**（见 GimbalModel.h，本类只管"朝向本身"，与具体装配无关）。
 //
-// 声明与定义分开：类内只留声明 + 一行式平凡成员，复杂 inline 定义集中在类外（仍 header-only，单文件）。
+// 成员函数都在类内定义（header-only，单文件）。
 // ============================================================
 class SO3 : public LinAlg::Mat3
 {
@@ -51,65 +51,59 @@ public:
         return deg < 0.0 ? deg + 360.0 : deg;
     }
 
-    // ── SO(3) 流形工具（手眼标定 / 装配模型用；复杂实现见类外）──
-    [[nodiscard]] static LinAlg::Mat3 expmap(const LinAlg::Vec3 &rotvec);   // 指数映射（Rodrigues，弧度）
-    [[nodiscard]] static LinAlg::Mat3 nearestRotation(const LinAlg::Mat3 &M); // 最近旋转（Higham 极分解）
-    [[nodiscard]] static LinAlg::Vec3 logRotation(const LinAlg::Mat3 &R);     // 旋转对数（SO(3)→so(3)，弧度）
+    // ── SO(3) 流形工具（手眼标定 / 装配模型用）──
+    // 指数映射（Rodrigues，logRotation 的逆）：旋转向量 axis·angle（弧度）→ 旋转矩阵。PoE 正向的积木。
+    //   R = cosθ·I + sinθ·[û]× + (1−cosθ)·ûûᵀ，θ=‖rotvec‖。近零 → 单位阵。
+    [[nodiscard]] static LinAlg::Mat3 expmap(const LinAlg::Vec3 &rotvec)
+    {
+        const double th = rotvec.norm();
+        if (th < 1e-12) return LinAlg::Mat3::Identity();
+        const LinAlg::Vec3 u = (1.0 / th) * rotvec;
+        const double c = std::cos(th), s = std::sin(th), k = 1.0 - c;
+        const double x = u.x(), y = u.y(), z = u.z();
+        return {c + k * x * x, k * x * y - s * z, k * x * z + s * y,
+                k * y * x + s * z, c + k * y * y, k * y * z - s * x,
+                k * z * x - s * y, k * z * y + s * x, c + k * z * z};
+    }   // 指数映射（Rodrigues，弧度）
+    // 最近旋转（Higham 正交极分解）：把带噪/求和后的矩阵投影回最近正交阵。det 可能 ±1，调用方自检。
+    [[nodiscard]] static LinAlg::Mat3 nearestRotation(const LinAlg::Mat3 &M)
+    {
+        LinAlg::Mat3 R = M;
+        for (int it = 0; it < 32; ++it)
+        {
+            const LinAlg::Mat3 Rinv = R.inverse();
+            if (!Rinv)
+                break; // M 奇异 → 提前退出，det 自检会判退化
+            const LinAlg::Mat3 Rit = Rinv.transpose();
+            double diff = 0.0;
+            LinAlg::Mat3 next;
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 3; ++c)
+                {
+                    next(r, c) = 0.5 * (R(r, c) + Rit(r, c));
+                    diff += std::abs(next(r, c) - R(r, c));
+                }
+            R = next;
+            if (diff < 1e-12)
+                break;
+        }
+        return R;
+    } // 最近旋转（Higham 极分解）
+    // 旋转对数（SO(3) → so(3)）：axis·angle 向量（弧度）。角 0 → 零向量；角 = π 时退化为零向量（轴向与模长一起丢），近 π 轴向不可靠。
+    [[nodiscard]] static LinAlg::Vec3 logRotation(const LinAlg::Mat3 &R)
+    {
+        double cosA = (R(0, 0) + R(1, 1) + R(2, 2) - 1.0) * 0.5;
+        cosA = cosA < -1.0 ? -1.0 : (cosA > 1.0 ? 1.0 : cosA);
+        const double angle = std::acos(cosA);
+        const LinAlg::Vec3 w{R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1)};
+        const double s = w.norm();
+        if (s < 1e-12)
+            return LinAlg::Vec3::Zeros(); // 近单位 → 零旋转
+        return (angle / s) * w;           // = angle · 单位轴
+    }     // 旋转对数（SO(3)→so(3)，弧度）
 
 private:
     // 裸包装:仅供已知正交的内部路径(exp/fromApprox/operator*/inverse)用，不对外——外部进不来非正交阵。
     explicit SO3(const LinAlg::Mat3 &m) : LinAlg::Mat3(m) {}
 };
 
-// ── SO3 inline 实现（类外，header-only）────────────────────────
-// 指数映射（Rodrigues，logRotation 的逆）：旋转向量 axis·angle（弧度）→ 旋转矩阵。PoE 正向的积木。
-//   R = cosθ·I + sinθ·[û]× + (1−cosθ)·ûûᵀ，θ=‖rotvec‖。近零 → 单位阵。
-inline LinAlg::Mat3 SO3::expmap(const LinAlg::Vec3 &rotvec)
-{
-    const double th = rotvec.norm();
-    if (th < 1e-12) return LinAlg::Mat3::Identity();
-    const LinAlg::Vec3 u = (1.0 / th) * rotvec;
-    const double c = std::cos(th), s = std::sin(th), k = 1.0 - c;
-    const double x = u.x(), y = u.y(), z = u.z();
-    return {c + k * x * x, k * x * y - s * z, k * x * z + s * y,
-            k * y * x + s * z, c + k * y * y, k * y * z - s * x,
-            k * z * x - s * y, k * z * y + s * x, c + k * z * z};
-}
-
-// 最近旋转（Higham 正交极分解）：把带噪/求和后的矩阵投影回最近正交阵。det 可能 ±1，调用方自检。
-inline LinAlg::Mat3 SO3::nearestRotation(const LinAlg::Mat3 &M)
-{
-    LinAlg::Mat3 R = M;
-    for (int it = 0; it < 32; ++it)
-    {
-        const LinAlg::Mat3 Rinv = R.inverse();
-        if (!Rinv)
-            break; // M 奇异 → 提前退出，det 自检会判退化
-        const LinAlg::Mat3 Rit = Rinv.transpose();
-        double diff = 0.0;
-        LinAlg::Mat3 next;
-        for (int r = 0; r < 3; ++r)
-            for (int c = 0; c < 3; ++c)
-            {
-                next(r, c) = 0.5 * (R(r, c) + Rit(r, c));
-                diff += std::abs(next(r, c) - R(r, c));
-            }
-        R = next;
-        if (diff < 1e-12)
-            break;
-    }
-    return R;
-}
-
-// 旋转对数（SO(3) → so(3)）：axis·angle 向量（弧度）。角 0 → 零向量；角 = π 时退化为零向量（轴向与模长一起丢），近 π 轴向不可靠。
-inline LinAlg::Vec3 SO3::logRotation(const LinAlg::Mat3 &R)
-{
-    double cosA = (R(0, 0) + R(1, 1) + R(2, 2) - 1.0) * 0.5;
-    cosA = cosA < -1.0 ? -1.0 : (cosA > 1.0 ? 1.0 : cosA);
-    const double angle = std::acos(cosA);
-    const LinAlg::Vec3 w{R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1)};
-    const double s = w.norm();
-    if (s < 1e-12)
-        return LinAlg::Vec3::Zeros(); // 近单位 → 零旋转
-    return (angle / s) * w;           // = angle · 单位轴
-}

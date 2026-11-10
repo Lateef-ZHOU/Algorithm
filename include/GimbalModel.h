@@ -103,7 +103,14 @@ public:
     // **本位形**的朝向（PoE 正向，通用）：R = ∏ exp(θ_i·û_i)，θ_i 取自各关节自己的当前值。
     // **无参**：位形就在自己身上。两个位形就是两个对象，换算写成
     //     mounting.toOrientation().inverse() * worldTarget.toOrientation()
-    [[nodiscard]] SO3 toOrientation() const;
+    [[nodiscard]] SO3 toOrientation() const
+    {
+        constexpr double D2R = std::numbers::pi / 180.0;
+        SO3 R; // 单位
+        for (const Joint &j : joints_)
+            R = R * SO3::exp(j.value() * D2R * j); // 逐轴轴角指数(各保证正交)再复合
+        return R;
+    }
 
     // ── 反解（朝向 → 一台摆到那个位形的模型）**不在本类声明**，由各具体模型提供一个静态
     //    具名口：`static Self fromOrientation(const SO3 &R)`。**按值返回、恒有解**（用户定）：都走 intrinsicXYZ，
@@ -135,77 +142,61 @@ protected:
     // 三轴正交内旋提取（两模型的 fromOrientation 都用它：WorldModel 三个分量全要，PanTiltModel 截前两个；
     // 非正交轴子类不用它）：把关节轴补成正交 U∈SO(3)（缺的第 3 列 = 前两轴叉积），E=UᵀRU 还原标准内旋 XYZ，
     // 返回 {θ₁,θ₂,θ₃}(°)，θ₁ ∈ [0°,360°)、θ₂ ∈ [−90°,90°]、θ₃ ∈ (−180°,180°]——这就是反解的典范窗（进关节后按窗 [−180°,180°) 收，180° 读成 −180°）。
-    [[nodiscard]] std::array<double, 3> intrinsicXYZ(const SO3 &R) const;
+    // ── 退化（奇异）的完整分类：**奇异 ⟺ 第一根轴与第三根轴共线** ──────────────────
+    // 三轴链 E = R₁(θ₁)·R₂(θ₂)·R₃(θ₃)，中间那根轴把首尾两根拧到共线时，首尾就只剩一个自由度：
+    //   · **Tait–Bryan（三轴互异，本模型 x-y-z）**：θ₂ = ±90° 时首尾共线。+90° 只定 θ₁+θ₃，−90° 只定 θ₃−θ₁。
+    //   · **Euler（首尾同轴，如 z-x-z）**：θ₂ = 0° 或 180° 时首尾共线。0° 定 θ₁+θ₃，180° 定 θ₁−θ₃。
+    //   本仓两个模型都是 Tait–Bryan，故**只有中间轴 ±90° 这一族**；将来真加了 Euler 型子类，
+    //   按同一条规矩办即可：**把第三轴的量折进与它共线的那根（三轴链里就是第一根），第三轴取 0**，
+    //   同向相加、反向相减。（双轴的 PanTiltModel 正解是单射、位形本身从不含糊；它的反解截取本函数的前两个
+    //   分量，两极的折法随之同一套。）
+    //
+    // **两极是多解不是无解**（用户定）：θ₂ = ±90° 时 cos θ₂ = 0，常规两式用到的
+    // E(1,2)/E(2,2)/E(0,1)/E(0,0) 同时趋零，atan2 退化成 atan2(0,0)——数值上是噪声，而数学上是
+    // **一族解**：θ₂ = +90° 只定 θ₁+θ₃，θ₂ = −90° 只定 θ₃−θ₁。既然是多解，就该在算法层收成**一个
+    // 确定的代表**，而不是把烂摊子丢给显示层去判"解不出"：取 **θ₃ = 0，把它折进 θ₁**，
+    // 两支合成一式 θ₁ = atan2(sinθ₂·E(1,0), E(1,1))。
+    // 于是同一个朝向恒得同一组三角，正反解在两极也闭合。
+    // **注意它治的是"正好在极点"**：离极点还有零点零几度时公式并不退化、解是唯一的，但方位角对指向的
+    // 条件数会炸（高度 89.95° 时俯仰动 0.05°、方位甩 44°）。那是这套参数化的固有性质，不是缺陷。
+    [[nodiscard]] std::array<double, 3> intrinsicXYZ(const SO3 &R) const
+    {
+        constexpr double R2D = 180.0 / std::numbers::pi;
+        // 极点带宽 kPoleCos（基类 protected 常量，选值理由见它的声明处）。
+        const LinAlg::Mat3 E = jointBasis(R);
+        const double e02 = E(0, 2) < -1.0 ? -1.0 : (E(0, 2) > 1.0 ? 1.0 : E(0, 2)); // sin θ₂
+        const double c2 = std::hypot(E(0, 0), E(0, 1));                             // |cos θ₂|
+        if (c2 <= kPoleCos)
+            return {SO3::Wrap360(std::atan2(e02 * E(1, 0), E(1, 1)) * R2D), // θ₁（θ₃ 已折进来）
+                    std::asin(e02) * R2D,                                   // θ₂ = ±90°
+                    0.0};                                                   // θ₃ 取 0 作代表
+        return {SO3::Wrap360(std::atan2(-E(1, 2), E(2, 2)) * R2D), // θ₁
+                std::asin(e02) * R2D,                              // θ₂
+                std::atan2(-E(0, 1), E(0, 0)) * R2D};              // θ₃
+    }
 
 private:
     // 关节基下的朝向 E = UᵀRU（U = orthoBasis）：在 E 里第 i 根关节就是第 i 根坐标轴。intrinsicXYZ 建在它上面。
-    [[nodiscard]] LinAlg::Mat3 jointBasis(const SO3 &R) const;
+    [[nodiscard]] LinAlg::Mat3 jointBasis(const SO3 &R) const
+    {
+        const LinAlg::Mat3 U = orthoBasis();
+        return U.transpose() * R * U;
+    }
 
     // 把关节轴补成正交 3×3：第 3 列缺则用前两轴叉积补(双轴→û₁×û₂)。要求各轴正交、N≥2(任何 pan-tilt 皆是)。
-    [[nodiscard]] LinAlg::Mat3 orthoBasis() const;
+    [[nodiscard]] LinAlg::Mat3 orthoBasis() const
+    {
+        const LinAlg::Vec3 a0 = joints_[0];
+        const LinAlg::Vec3 a1 = joints_[1];
+        const LinAlg::Vec3 a2 = joints_.size() > 2 ? LinAlg::Vec3(joints_[2]) : LinAlg::Vec3::cross(a0, a1);
+        return {a0.x(), a1.x(), a2.x(),
+                a0.y(), a1.y(), a2.y(),
+                a0.z(), a1.z(), a2.z()};
+    }
 
     // 关节表：轴向 + 当前值，按复合顺序排列。**私有持有**（见类注）。
     std::vector<Joint> joints_;
 };
-
-// ── GimbalModel inline 实现（类外，header-only）─────────────────
-inline SO3 GimbalModel::toOrientation() const
-{
-    constexpr double D2R = std::numbers::pi / 180.0;
-    SO3 R; // 单位
-    for (const Joint &j : joints_)
-        R = R * SO3::exp(j.value() * D2R * j); // 逐轴轴角指数(各保证正交)再复合
-    return R;
-}
-
-inline LinAlg::Mat3 GimbalModel::jointBasis(const SO3 &R) const
-{
-    const LinAlg::Mat3 U = orthoBasis();
-    return U.transpose() * R * U;
-}
-
-// ── 退化（奇异）的完整分类：**奇异 ⟺ 第一根轴与第三根轴共线** ──────────────────
-// 三轴链 E = R₁(θ₁)·R₂(θ₂)·R₃(θ₃)，中间那根轴把首尾两根拧到共线时，首尾就只剩一个自由度：
-//   · **Tait–Bryan（三轴互异，本模型 x-y-z）**：θ₂ = ±90° 时首尾共线。+90° 只定 θ₁+θ₃，−90° 只定 θ₃−θ₁。
-//   · **Euler（首尾同轴，如 z-x-z）**：θ₂ = 0° 或 180° 时首尾共线。0° 定 θ₁+θ₃，180° 定 θ₁−θ₃。
-//   本仓两个模型都是 Tait–Bryan，故**只有中间轴 ±90° 这一族**；将来真加了 Euler 型子类，
-//   按同一条规矩办即可：**把第三轴的量折进与它共线的那根（三轴链里就是第一根），第三轴取 0**，
-//   同向相加、反向相减。（双轴的 PanTiltModel 正解是单射、位形本身从不含糊；它的反解截取本函数的前两个
-//   分量，两极的折法随之同一套。）
-//
-// **两极是多解不是无解**（用户定）：θ₂ = ±90° 时 cos θ₂ = 0，常规两式用到的
-// E(1,2)/E(2,2)/E(0,1)/E(0,0) 同时趋零，atan2 退化成 atan2(0,0)——数值上是噪声，而数学上是
-// **一族解**：θ₂ = +90° 只定 θ₁+θ₃，θ₂ = −90° 只定 θ₃−θ₁。既然是多解，就该在算法层收成**一个
-// 确定的代表**，而不是把烂摊子丢给显示层去判"解不出"：取 **θ₃ = 0，把它折进 θ₁**，
-// 两支合成一式 θ₁ = atan2(sinθ₂·E(1,0), E(1,1))。
-// 于是同一个朝向恒得同一组三角，正反解在两极也闭合。
-// **注意它治的是"正好在极点"**：离极点还有零点零几度时公式并不退化、解是唯一的，但方位角对指向的
-// 条件数会炸（高度 89.95° 时俯仰动 0.05°、方位甩 44°）。那是这套参数化的固有性质，不是缺陷。
-inline std::array<double, 3> GimbalModel::intrinsicXYZ(const SO3 &R) const
-{
-    constexpr double R2D = 180.0 / std::numbers::pi;
-    // 极点带宽 kPoleCos（基类 protected 常量，选值理由见它的声明处）。
-    const LinAlg::Mat3 E = jointBasis(R);
-    const double e02 = E(0, 2) < -1.0 ? -1.0 : (E(0, 2) > 1.0 ? 1.0 : E(0, 2)); // sin θ₂
-    const double c2 = std::hypot(E(0, 0), E(0, 1));                             // |cos θ₂|
-    if (c2 <= kPoleCos)
-        return {SO3::Wrap360(std::atan2(e02 * E(1, 0), E(1, 1)) * R2D), // θ₁（θ₃ 已折进来）
-                std::asin(e02) * R2D,                                   // θ₂ = ±90°
-                0.0};                                                   // θ₃ 取 0 作代表
-    return {SO3::Wrap360(std::atan2(-E(1, 2), E(2, 2)) * R2D), // θ₁
-            std::asin(e02) * R2D,                              // θ₂
-            std::atan2(-E(0, 1), E(0, 0)) * R2D};              // θ₃
-}
-
-inline LinAlg::Mat3 GimbalModel::orthoBasis() const
-{
-    const LinAlg::Vec3 a0 = joints_[0];
-    const LinAlg::Vec3 a1 = joints_[1];
-    const LinAlg::Vec3 a2 = joints_.size() > 2 ? LinAlg::Vec3(joints_[2]) : LinAlg::Vec3::cross(a0, a1);
-    return {a0.x(), a1.x(), a2.x(),
-            a0.y(), a1.y(), a2.y(),
-            a0.z(), a1.z(), a2.z()};
-}
 
 // ============================================================
 // WorldModel — 世界系 ENU，本质是一台「三正交轴、内旋」的虚拟云台

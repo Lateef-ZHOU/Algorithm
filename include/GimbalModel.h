@@ -72,7 +72,7 @@ private:
 //
 // 「两个模型间换算」（世界 ↔ 云台）**不做成成员**——它是两台模型 + 一个安装朝向的关系，不属于
 // 任一模型；就是几行 SO3 复合（`toOrientation` / `inverse` / `fromOrientation`），住在持有安装标定的
-// 云台族基（GMBDeviceBase::gimbalOf / worldOf）。
+// 云台族基（GMBFamily::gimbalOf / worldOf）。
 // ============================================================
 class GimbalModel
 {
@@ -126,7 +126,7 @@ public:
 protected:
     explicit GimbalModel(std::vector<Joint> joints) : joints_(std::move(joints)) {}
     // **非虚 + protected**：本类一个虚函数都没有，而位形从不经基类指针删除（它们是被按值造、
-    // 按值传的东西）。protected 顺带封死 `delete (GimbalModel *)p`——同 Collector / GMBDeviceBase。
+    // 按值传的东西）。protected 顺带封死 `delete (GimbalModel *)p`——同 Collector / GMBFamily。
     ~GimbalModel() = default;
 
     // 极点带宽：|cos θ₂| ≤ kPoleCos 按"光指着极点"收（intrinsicXYZ 用；两模型的反解都建在它上面）。

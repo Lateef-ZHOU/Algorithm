@@ -59,8 +59,9 @@ int main(int argc, char **argv)
         || std::abs(calm.ws[0]) > 0.01) return 11;
     const auto shifted = RadialWind::Calc(spectrum, 0.775, 16.0);
     if (std::abs(shifted.ws[1] - 2.0 * 0.775) > 0.01) return 12;
+    // 参考频率在不在频带内是硬件配置的事，算法照常换算。
     const auto outOfBand = RadialWind::Calc(spectrum, 0.775, 80.0);
-    if (RadialWind::inBand(spectrum, 80.0) || !std::isnan(outOfBand.ws[0]) || outOfBand.cnr[0] != calm.cnr[0]) return 13;
+    if (std::abs(outOfBand.ws[0] - (18.0 - 80.0) * 0.775) > 0.01 || outOfBand.cnr[0] != calm.cnr[0]) return 13;
     if (!RadialWind::Calc(LinearArray2D<double>(2, 9, 0, 15, 10, 2, {1, 2}), 0.775, 18).ws.empty()) return 14;
     return 0;
 }

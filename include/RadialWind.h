@@ -2,7 +2,6 @@
 #include <cmath>
 #include <numbers>
 #include <utility>
-#include <limits>
 #include <vector>
 #include <QtGlobal>
 
@@ -31,17 +30,10 @@ namespace RadialWind
     return wavelengthM / 2.0 * 1e6;
 }
 
-// 零风速参考落在功率谱频率轴（列轴，MHz）的覆盖范围内才能换算风速。
-[[nodiscard]] inline bool inBand(const LinearArray2D<double> &spectrum, const double zeroWindMHz) noexcept
-{
-    return spectrum.columns > 0 && spectrum.columnStep > 0.0 && zeroWindMHz >= spectrum.columnPosition(0)
-           && zeroWindMHz <= spectrum.columnPosition(spectrum.columns - 1);
-}
-
 // 一帧的两列产物：轴取功率谱的行轴（斜距）。
 struct Result
 {
-    LinearArray<double> ws;  ///< 每门径向风速（m/s）；零风速参考不在频带内时为 NaN
+    LinearArray<double> ws;  ///< 每门径向风速（m/s）
     LinearArray<double> cnr; ///< 每门 CNR（dB）
 };
 
@@ -54,8 +46,7 @@ Calc(const LinearArray2D<double> &spectrum, const double metersPerSecondPerMHz, 
         return {};
     const int rows = spectrum.rows, cols = spectrum.columns;
     const double slope = spectrum.columnStep * metersPerSecondPerMHz;
-    const double intercept = inBand(spectrum, zeroWindMHz) ? (spectrum.columnStart - zeroWindMHz) * metersPerSecondPerMHz
-                                                           : std::numeric_limits<double>::quiet_NaN();
+    const double intercept = (spectrum.columnStart - zeroWindMHz) * metersPerSecondPerMHz;
     Result result{LinearArray<double>(spectrum.rowStart, spectrum.rowStep, std::vector<double>(rows)),
                   LinearArray<double>(spectrum.rowStart, spectrum.rowStep, std::vector<double>(rows))};
     const double *const buf = spectrum.data();
